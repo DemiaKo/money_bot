@@ -36,7 +36,7 @@ bot.start((ctx) => {
 bot.hears('🏦 Мої баланси', async (ctx) => {
   const { data: banks, error } = await supabase.from('banks').select('*');
   
-  if (error) return ctx.reply('Помилка отримання даних з бази.');
+  if (error) return ctx.reply('Помилка БД: ' + error.message);
   if (!banks || banks.length === 0) return ctx.reply('Ти ще не додав жодного банку в базу Supabase.');
 
   let text = '<b>Твої баланси:</b>\n\n';
