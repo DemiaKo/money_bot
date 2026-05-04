@@ -138,40 +138,53 @@ bot.on('text', async (ctx) => {
 });
 
 // ГОЛОВНИЙ ЕКСПОРТ ДЛЯ VERCEL (Серверна частина)
+// ГОЛОВНИЙ ЕКСПОРТ ДЛЯ VERCEL (Серверна частина)
 module.exports = async function (req, res) {
   try {
     // 1. Обробка переходу за посиланням з браузера
     if (req.method === 'GET') {
-      return res.status(200).send('Бот живий! Цей ендпоінт чекає на POST-запити від Telegram.');
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end('Бот живий! Цей ендпоінт чекає на POST-запити від Telegram.');
+      return;
     }
 
     // 2. Обробка вебхуків від Telegram
     if (req.method === 'POST') {
-      // Vercel зазвичай сам парсить JSON, але іноді віддає як рядок
-      let body;
-      try {
-        body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-      } catch (e) {
-        console.error('Не вдалося розпарсити тіло запиту:', req.body);
-        return res.status(400).send('Invalid JSON');
+      let body = req.body;
+
+      // Якщо Vercel не розпарсив тіло автоматично, читаємо його вручну зі стріму
+      if (!body) {
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        const data = Buffer.concat(chunks).toString();
+        body = data ? JSON.parse(data) : {};
+      } else if (typeof body === 'string') {
+        body = JSON.parse(body);
       }
 
-      // Захист від порожніх запитів (щоб Telegraf не падав)
+      // Перевіряємо, чи є валідне повідомлення від Telegram
       if (!body || !body.update_id) {
-        console.error('Отримано POST-запит без update_id:', body);
-        return res.status(400).send('Bad Request: Missing update_id');
+        console.error('Отримано порожній запит або без update_id:', body);
+        res.statusCode = 400;
+        res.end('Bad Request');
+        return;
       }
 
-      // Якщо все добре, передаємо дані боту
+      // Передаємо дані боту. Telegraf сам викличе res.end(), коли завершить.
       await bot.handleUpdate(body, res); 
       return; 
     }
 
     // Якщо це не GET і не POST
-    res.status(405).send('Method Not Allowed');
+    res.statusCode = 405;
+    res.end('Method Not Allowed');
   } catch (error) {
     console.error('Помилка обробки webhook:', error);
-    // Повертаємо 200 навіть при помилці, щоб Telegram не спамив повторними запитами
-    res.status(200).send('Error ignored');
+    // Повертаємо 200 навіть при помилці коду, щоб Telegram не спамив нас повторами
+    res.statusCode = 200; 
+    res.end('Error ignored');
   }
 };
