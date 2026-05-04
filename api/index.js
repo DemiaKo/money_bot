@@ -1,12 +1,24 @@
-require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const { createClient } = require('@supabase/supabase-js');
 
-// Підключення до Supabase та Telegram
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-const bot = new Telegraf(process.env.BOT_TOKEN);
+// Перевіряємо, чи підтягнулися змінні середовища
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const botToken = process.env.BOT_TOKEN;
 
-// Простий об'єкт для збереження стану користувача (щоб знати, що він зараз вводить)
+if (!supabaseUrl || !supabaseKey || !botToken) {
+  console.error('Увага: Не вистачає змінних середовища!');
+}
+
+// Ініціалізація клієнтів
+const supabase = createClient(supabaseUrl, supabaseKey);
+const bot = new Telegraf(botToken);
+
+/* 
+  Словник для збереження поточного кроку користувача. 
+  Примітка: на Vercel цей стан може зникати, якщо функція "засинає" між запитами.
+  Для 100% надійності в майбутньому стан можна зберігати в окремій таблиці Supabase.
+*/
 const userState = new Map();
 
 // Головна клавіатура
@@ -15,92 +27,133 @@ const mainKeyboard = Markup.keyboard([
   ['🏦 Мої баланси']
 ]).resize();
 
+// Команда /start
 bot.start((ctx) => {
-  ctx.reply('Привіт! Я твій фінансовий помічник.', mainKeyboard);
+  ctx.reply('Привіт! Я твій фінансовий бот. Обери дію нижче:', mainKeyboard);
 });
 
-// Обробка натискання на "Мої баланси"
+// Перегляд балансів
 bot.hears('🏦 Мої баланси', async (ctx) => {
   const { data: banks, error } = await supabase.from('banks').select('*');
-  if (error) return ctx.reply('Помилка отримання даних.');
-
-  if (!banks.length) return ctx.reply('У тебе ще немає доданих банків у базі.');
+  
+  if (error) return ctx.reply('Помилка отримання даних з бази.');
+  if (!banks || banks.length === 0) return ctx.reply('Ти ще не додав жодного банку в базу Supabase.');
 
   let text = '<b>Твої баланси:</b>\n\n';
   banks.forEach(bank => {
-    text += `🏦 ${bank.name}: ${bank.balance} грн\n`;
+    // Використовуємо parseFloat, щоб відкинути зайві нулі після коми
+    text += `🏦 ${bank.name}: ${parseFloat(bank.balance)} грн\n`;
   });
   
   ctx.replyWithHTML(text);
 });
 
-// Обробка натискання на "Витрата" або "Дохід"
+// Універсальна функція для старту витрати або доходу
 const handleTransactionStart = async (ctx, type) => {
-  const { data: banks } = await supabase.from('banks').select('*');
+  const { data: banks, error } = await supabase.from('banks').select('*');
   
-  // Створюємо inline-кнопки з банками
+  if (error || !banks) return ctx.reply('Помилка отримання списку банків.');
+  if (banks.length === 0) return ctx.reply('Додай банки в базу даних.');
+
+  // Генеруємо inline-кнопки
   const buttons = banks.map(bank => 
-    Markup.button.callback(bank.name, `select_bank_${type}_${bank.id}`)
+    Markup.button.callback(bank.name, `select_${type}_${bank.id}`)
   );
 
-  ctx.reply('Обери картку:', Markup.inlineKeyboard(buttons, { columns: 2 }));
+  ctx.reply('Обери картку/банк:', Markup.inlineKeyboard(buttons, { columns: 2 }));
 };
 
 bot.hears('💸 Витрата', (ctx) => handleTransactionStart(ctx, 'expense'));
 bot.hears('💰 Дохід', (ctx) => handleTransactionStart(ctx, 'income'));
 
-// Обробка вибору банку через inline-кнопку
-bot.action(/select_bank_(expense|income)_(.+)/, async (ctx) => {
+// Обробка натискання на inline-кнопку з банком
+bot.action(/select_(expense|income)_(.+)/, async (ctx) => {
   const type = ctx.match[1];
   const bankId = ctx.match[2];
   
-  // Зберігаємо стан: чекаємо на введення суми для конкретного банку
+  // Запам'ятовуємо, що користувач зараз має ввести суму
   userState.set(ctx.from.id, { step: 'WAITING_FOR_AMOUNT', type, bankId });
   
   const actionText = type === 'expense' ? 'витрати' : 'доходу';
-  ctx.reply(`Введи суму ${actionText} цифрами (наприклад: 150.50):`);
-  ctx.answerCbQuery(); // Закриваємо стан "завантаження" на кнопці
+  
+  // Закриваємо стан "завантаження" на кнопці, щоб вона не блимала
+  await ctx.answerCbQuery(); 
+  ctx.reply(`Введи суму ${actionText} цифрами (наприклад: 150 або 50.50):`);
 });
 
-// Обробка текстових повідомлень (коли очікуємо суму)
+// Обробка тексту (коли користувач вводить суму)
 bot.on('text', async (ctx) => {
   const state = userState.get(ctx.from.id);
+  
+  // Якщо ми не чекали на суму від цього користувача, ігноруємо текст
   if (!state || state.step !== 'WAITING_FOR_AMOUNT') return;
 
-  const amount = parseFloat(ctx.message.text);
-  if (isNaN(amount)) {
-    return ctx.reply('Будь ласка, введи коректне число.');
+  // Замінюємо кому на крапку, якщо користувач ввів дробове число з комою
+  const amountText = ctx.message.text.replace(',', '.');
+  const amount = parseFloat(amountText);
+
+  if (isNaN(amount) || amount <= 0) {
+    return ctx.reply('Будь ласка, введи коректне додатнє число.');
   }
 
-  // Отримуємо поточний баланс банку
-  const { data: bankData } = await supabase
+  // 1. Отримуємо поточний баланс
+  const { data: bankData, error: bankError } = await supabase
     .from('banks')
     .select('balance')
     .eq('id', state.bankId)
     .single();
 
-  const newBalance = state.type === 'expense' 
-    ? bankData.balance - amount 
-    : parseFloat(bankData.balance) + amount;
+  if (bankError || !bankData) return ctx.reply('Помилка: банк не знайдено в базі.');
 
-  // Оновлюємо баланс і записуємо транзакцію паралельно
-  await Promise.all([
-    supabase.from('banks').update({ balance: newBalance }).eq('id', state.bankId),
-    supabase.from('transactions').insert([{ 
+  const currentBalance = parseFloat(bankData.balance) || 0;
+  
+  // 2. Рахуємо новий баланс
+  const newBalance = state.type === 'expense' 
+    ? currentBalance - amount 
+    : currentBalance + amount;
+
+  // 3. Оновлюємо баланс та записуємо транзакцію
+  const { error: updateError } = await supabase
+    .from('banks')
+    .update({ balance: newBalance })
+    .eq('id', state.bankId);
+
+  const { error: insertError } = await supabase
+    .from('transactions')
+    .insert([{ 
       bank_id: state.bankId, 
       type: state.type, 
       amount: amount 
-    }])
-  ]);
+    }]);
 
-  userState.delete(ctx.from.id); // Очищаємо стан
+  if (updateError || insertError) {
+    return ctx.reply('Сталася помилка при збереженні в базу.');
+  }
+
+  // Очищаємо стан, щоб бот більше не чекав суму
+  userState.delete(ctx.from.id); 
   
-  const actionText = state.type === 'expense' ? 'Витрату' : 'Дохід';
-  ctx.reply(`${actionText} на суму ${amount} грн успішно записано!`, mainKeyboard);
+  const actionWord = state.type === 'expense' ? 'Витрату' : 'Дохід';
+  ctx.reply(`✅ ${actionWord} на ${amount} грн успішно записано!`, mainKeyboard);
 });
 
-bot.launch().then(() => console.log('Bot is running...'));
+// ГОЛОВНИЙ ЕКСПОРТ ДЛЯ VERCEL (Серверна частина)
+module.exports = async function (req, res) {
+  try {
+    // Обробка переходу за посиланням з браузера
+    if (req.method === 'GET') {
+      return res.status(200).send('Бот живий! Цей ендпоінт чекає на POST-запити (вебхуки) від Telegram.');
+    }
 
-// Безпечне завершення роботи
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    // Обробка вебхуків від Telegram
+    if (req.method === 'POST') {
+      await bot.handleUpdate(req.body, res); 
+      return; 
+    }
+
+    res.status(405).send('Method Not Allowed');
+  } catch (error) {
+    console.error('Помилка обробки webhook:', error);
+    res.status(500).send('Помилка сервера!');
+  }
+};
