@@ -87,13 +87,17 @@ function createBot() {
   bot.action('manage_cards', async (ctx) => {
     await ctx.answerCbQuery();
     const cards = await db.getCards(ctx.from.id);
-    const text = cards.length
-      ? '🗂 *Ваші карти:*'
-      : '🗂 Карт немає. Додайте першу!';
-    await ctx.editMessageText(text, {
-      parse_mode: 'Markdown',
-      ...manageCardsKeyboard(cards),
-    });
+    const text = cards.length ? '🗂 *Ваші карти:*' : '🗂 Карт немає. Додайте першу!';
+  
+    try {
+      await ctx.editMessageText(text, {
+        parse_mode: 'Markdown',
+        ...manageCardsKeyboard(cards),
+      });
+    } catch (err) {
+      if (err.description?.includes('message is not modified')) return;
+      throw err;
+    }
   });
 
   bot.action('add_card', async (ctx) => {

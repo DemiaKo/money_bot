@@ -33,6 +33,8 @@ const addCardScene = new Scenes.WizardScene(
 
   async (ctx) => {
     if (!ctx.callbackQuery?.data?.startsWith('currency:')) return;
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+
     ctx.wizard.state.currency = ctx.callbackQuery.data.split(':')[1];
     await ctx.answerCbQuery();
 
