@@ -1,18 +1,14 @@
 {
-  "name": "money_bot",
+  "name": "finance-bot",
   "version": "1.0.0",
-  "description": "",
-  "main": "api/index.js",
+  "main": "api/webhook.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node -r dotenv/config dev.js",
+    "deploy": "vercel --prod"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "@supabase/supabase-js": "^2.105.1",
-    "dotenv": "^17.4.2",
-    "telegraf": "^4.16.3"
+    "telegraf": "^4.16.3",
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.4.1"
   }
 }
