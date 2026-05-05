@@ -37,7 +37,8 @@ const addCardScene = new Scenes.WizardScene(
     await ctx.answerCbQuery();
 
     const { name, color, currency } = ctx.wizard.state;
-    const { error } = await db.addCard(ctx.from.id, name, currency, color);
+    const { data, error } = await db.addCard(ctx.from.id, name, currency, color);
+    console.log('addCard result:', { data, error });
 
     const { mainMenu } = require('../keyboards');
     if (error) {
