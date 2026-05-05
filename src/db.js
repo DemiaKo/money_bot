@@ -24,19 +24,18 @@ async function ensureUser(telegramUser) {
 
 async function createDefaultCategories(userId) {
   const defaults = [
-    { name: 'Їжа', type: 'expense', emoji: '🍔' },
-    { name: 'Транспорт', type: 'expense', emoji: '🚗' },
+    { name: 'Їжа',        type: 'expense', emoji: '🍔' },
+    { name: 'Транспорт',  type: 'expense', emoji: '🚗' },
     { name: 'Комунальні', type: 'expense', emoji: '🏠' },
-    { name: 'Здоров\'я', type: 'expense', emoji: '💊' },
-    { name: 'Розваги', type: 'expense', emoji: '🎮' },
-    { name: 'Одяг', type: 'expense', emoji: '👕' },
-    { name: 'Інше', type: 'expense', emoji: '📦' },
-    { name: 'Зарплата', type: 'income', emoji: '💰' },
-    { name: 'Фріланс', type: 'income', emoji: '💻' },
-    { name: 'Подарунок', type: 'income', emoji: '🎁' },
-    { name: 'Інше', type: 'income', emoji: '📥' },
+    { name: 'Здоров\'я',  type: 'expense', emoji: '💊' },
+    { name: 'Розваги',    type: 'expense', emoji: '🎮' },
+    { name: 'Одяг',       type: 'expense', emoji: '👕' },
+    { name: 'Інше',       type: 'expense', emoji: '📦' },
+    { name: 'Зарплата',   type: 'income',  emoji: '💰' },
+    { name: 'Фріланс',    type: 'income',  emoji: '💻' },
+    { name: 'Подарунок',  type: 'income',  emoji: '🎁' },
+    { name: 'Інше',       type: 'income',  emoji: '📥' },
   ];
-
   await supabase.from('categories').insert(
     defaults.map(c => ({ ...c, user_id: userId, is_default: true }))
   );
@@ -98,7 +97,7 @@ async function addTransaction(userId, cardId, categoryId, type, amount, currency
 async function getTransactions(userId, limit = 10, cardId = null) {
   let query = supabase
     .from('transactions')
-    .select(`*, cards(name, color, currency), categories(name, emoji)`)
+    .select('*, cards(name, color, currency), categories(name, emoji)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -125,12 +124,10 @@ async function getCardBalance(cardId) {
 async function getAllBalances(userId) {
   const cards = await getCards(userId);
   const result = [];
-
   for (const card of cards) {
     const balance = await getCardBalance(card.id);
     result.push({ ...card, balance });
   }
-
   return result;
 }
 
