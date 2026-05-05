@@ -2,9 +2,12 @@ const { Telegraf, Markup } = require('telegraf');
 const { createClient } = require('@supabase/supabase-js');
 const db = require('./db');
 
-// ─── SUPABASE SESSION STORE ───────────────────────────────────────────────────
-// Vercel serverless не зберігає пам'ять між запитами,
-// тому session зберігаємо в Supabase таблиці bot_sessions
+// ─── SESSION STORE ────────────────────────────────────────────────────────────
+// Намагаємось зберігати в Supabase. Якщо таблиця не існує — fallback до Map.
+// Map працює тільки якщо Vercel тримає той самий інстанс (не гарантовано),
+// але принаймні не крашає бот.
+
+const memoryStore = new Map();
 
 function supabaseSession() {
   const supabase = createClient(
@@ -15,27 +18,42 @@ function supabaseSession() {
   return async (ctx, next) => {
     const key = String(ctx.from?.id || ctx.chat?.id || 'unknown');
 
-    let sessionData = { flow: null, step: null, data: {} };
+    // Завантажуємо session
+    let sessionData = null;
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('bot_sessions')
         .select('session')
         .eq('key', key)
         .single();
-      if (data?.session) sessionData = data.session;
-    } catch (_) {}
 
-    if (!sessionData.data) sessionData.data = {};
-    ctx.session = sessionData;
+      if (error && error.code !== 'PGRST116') {
+        // PGRST116 = row not found, це нормально
+        console.error('Session read error:', error.message);
+      }
+      if (data?.session) sessionData = data.session;
+    } catch (e) {
+      console.error('Session read exception:', e.message);
+    }
+
+    // Fallback до memory якщо Supabase не відповів
+    if (!sessionData && memoryStore.has(key)) {
+      sessionData = memoryStore.get(key);
+    }
+
+    ctx.session = sessionData || { flow: null, step: null, data: {} };
+    if (!ctx.session.data) ctx.session.data = {};
 
     await next();
 
+    // Зберігаємо session
+    memoryStore.set(key, ctx.session); // завжди в memory як backup
     try {
       await supabase
         .from('bot_sessions')
         .upsert({ key, session: ctx.session }, { onConflict: 'key' });
     } catch (e) {
-      console.error('Session save error:', e);
+      console.error('Session save exception:', e.message);
     }
   };
 }
@@ -112,6 +130,9 @@ function createBot() {
 
   bot.on('text', async (ctx) => {
     const text = ctx.message.text.trim();
+
+    console.log(`[${ctx.from.id}] text="${text}" flow=${ctx.session.flow} step=${ctx.session.step}`);
+
     if (text === '❌ Скасувати') return cancel(ctx);
     if (ctx.session.flow) return handleFlow(ctx, text);
 
@@ -133,7 +154,10 @@ function createBot() {
 // ─── FLOW ROUTER ─────────────────────────────────────────────────────────────
 
 async function handleFlow(ctx, text) {
-  switch (ctx.session.flow) {
+  const { flow } = ctx.session;
+  console.log(`[handleFlow] flow=${flow}`);
+
+  switch (flow) {
     case 'expense':
     case 'income':       return handleTransactionFlow(ctx, text);
     case 'add_card':     return handleAddCardFlow(ctx, text);
