@@ -195,7 +195,8 @@ async function handleTransactionFlow(ctx, text) {
     if (!card) return ctx.reply('❗ Виберіть карту зі списку 👇');
 
     const categories = await db.getCategories(ctx.from.id, type);
-    ctx.session.data = { ...data, cardId: card.id, categories };
+    // Валюта береться з картки — не питаємо юзера ще раз
+    ctx.session.data = { ...data, cardId: card.id, currency: card.currency, categories };
     ctx.session.step = 'select_category';
 
     return ctx.reply('🏷 Виберіть категорію:', listKeyboard(categories.map(c => `${c.emoji} ${c.name}`)));
@@ -210,7 +211,7 @@ async function handleTransactionFlow(ctx, text) {
 
     const label = type === 'expense' ? 'витрати' : 'надходження';
     return ctx.reply(
-      `💰 Введіть суму ${label}:\n_(наприклад: 150 або 1500.50)_`,
+      `💰 Введіть суму ${label} (${data.currency}):\n_(наприклад: 150 або 1500.50)_`,
       { parse_mode: 'Markdown', ...cancelKeyboard }
     );
   }
@@ -219,13 +220,6 @@ async function handleTransactionFlow(ctx, text) {
     const amount = parseFloat(text.replace(',', '.'));
     if (isNaN(amount) || amount <= 0) return ctx.reply('❗ Введіть коректну суму (число більше 0):');
     ctx.session.data = { ...data, amount };
-    ctx.session.step = 'select_currency';
-    return ctx.reply('💱 Виберіть валюту:', listKeyboard(CURRENCIES));
-  }
-
-  if (step === 'select_currency') {
-    if (!CURRENCIES.includes(text)) return ctx.reply('❗ Виберіть валюту зі списку 👇');
-    ctx.session.data = { ...data, currency: parseCurrency(text) };
     ctx.session.step = 'enter_note';
     return ctx.reply('📝 Додайте коментар або пропустіть:', skipCancelKeyboard);
   }
